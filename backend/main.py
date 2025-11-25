@@ -29,7 +29,6 @@ app.add_middleware(
 MOSCOW_TZ = timezone("Europe/Moscow")
 WORK_START_HOUR = 8
 WORK_END_HOUR = 17
-GLOBAL_IN_PROGRESS_SETTING = "in progress"
 
 # === Pydantic модели ===
 class Period(BaseModel):
@@ -40,6 +39,7 @@ class ProcessRequest(BaseModel):
     items: List[Dict[str, Any]]
     periods: List[Period]
     session_cookie: Optional[str] = None
+    status_name: Optional[str] = "in progress"  # Статус для подсчета времени
 
 # === Вспомогательные функции (из оригинального скрипта) ===
 def parse_iso_to_msk(dt_str: str) -> datetime:
@@ -96,12 +96,22 @@ def add_working_time_segment(start_dt: datetime, end_dt: datetime) -> timedelta:
 def calculate_in_progress_time_for_period(
     history: List[Dict[str, Any]],
     period_start_str: str,
-    period_end_str: str
+    period_end_str: str,
+    status_name: str = "in progress"
 ) -> float:
     """
-    Вычисляет время (в минутах) в статусе 'in progress' ТОЛЬКО внутри заданного периода,
+    Вычисляет время (в минутах) в указанном статусе ТОЛЬКО внутри заданного периода,
     учитывая рабочие часы и исключая выходные.
+    
+    Args:
+        history: История изменений статусов
+        period_start_str: Начало периода (YYYY-MM-DD)
+        period_end_str: Конец периода (YYYY-MM-DD)
+        status_name: Название статуса для подсчета (по умолчанию "in progress")
     """
+    # Нормализуем статус для сравнения (lowercase)
+    target_status = status_name.lower()
+    
     # Период в МСК
     period_start = datetime.strptime(period_start_str, "%Y-%m-%d").replace(
         tzinfo=MOSCOW_TZ, hour=0, minute=0, second=0, microsecond=0
@@ -118,19 +128,26 @@ def calculate_in_progress_time_for_period(
             if not e.get("date") or not new_status:
                 continue
             events.append((parse_iso_to_msk(e["date"]), new_status))
-        except Exception:
+        except Exception as ex:
+            print(f"Ошибка при парсинге события истории: {ex}")
             continue
     
     if not events:
+        print(f"Нет событий в истории для периода {period_start_str} - {period_end_str}")
         return 0.0
     
     events.sort(key=lambda x: x[0])
     
+    # Логируем найденные статусы для отладки
+    unique_statuses = set(status for _, status in events)
+    print(f"Найденные статусы в истории: {unique_statuses}")
+    print(f"Ищем статус: '{target_status}'")
+    
     # Определяем состояние на момент period_start
-    in_progress = False
+    in_target_status = False
     for dt, status in events:
         if dt <= period_start:
-            in_progress = (status == GLOBAL_IN_PROGRESS_SETTING)
+            in_target_status = (status == target_status)
         else:
             break
     
@@ -143,23 +160,24 @@ def calculate_in_progress_time_for_period(
             continue
         
         if dt > period_end:
-            if in_progress:
+            if in_target_status:
                 total_td += add_working_time_segment(last_ts, period_end)
             break
         
         # От last_ts до dt — состояние инвариантное
-        if in_progress:
+        if in_target_status:
             total_td += add_working_time_segment(last_ts, dt)
         
         # Обновляем состояние и маркер времени
-        in_progress = (status == GLOBAL_IN_PROGRESS_SETTING)
+        in_target_status = (status == target_status)
         last_ts = dt
     else:
         # Если цикл завершился без break и период не закрыт событиями
-        if last_ts < period_end and in_progress:
+        if last_ts < period_end and in_target_status:
             total_td += add_working_time_segment(last_ts, period_end)
     
     minutes = total_td.total_seconds() / 60
+    print(f"Подсчитано минут в статусе '{target_status}': {minutes:.2f}")
     return minutes
 
 def save_to_excel_multi(
@@ -269,11 +287,17 @@ async def process_data(request: ProcessRequest):
             task_name = item.get("name", "Не указано")
             
             # Для каждого периода считаем часы отдельно
+            status_to_search = request.status_name or "in progress"
+            print(f"Обработка задачи {key}, статус для поиска: '{status_to_search}'")
+            print(f"Количество событий в истории: {len(filtered_history)}")
+            
             for period in request.periods:
                 mins = calculate_in_progress_time_for_period(
-                    filtered_history, period.start, period.end
+                    filtered_history, period.start, period.end, status_to_search
                 )
                 hours = round(mins / 60, 1)
+                
+                print(f"Задача {key}, период {period.start}-{period.end}: {hours} часов")
                 
                 if hours > 0:
                     grouped_by_period[(period.start, period.end)][display_name].append(

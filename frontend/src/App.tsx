@@ -24,6 +24,8 @@ function App() {
     { start: '', end: '' }
   ])
   const [sessionCookie, setSessionCookie] = useState('')
+  const [statusName, setStatusName] = useState('in progress')
+  const [customStatus, setCustomStatus] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -84,10 +86,13 @@ function App() {
     setSuccess(null)
 
     try {
+      const finalStatusName = statusName === 'custom' ? customStatus : statusName
+      
       const response = await axios.post('http://localhost:8000/api/process', {
         items,
         periods: validPeriods,
         session_cookie: sessionCookie || undefined,
+        status_name: finalStatusName,
       })
 
       // Скачиваем файл
@@ -178,9 +183,34 @@ function App() {
           </button>
         </div>
 
+        {/* Status Name */}
+        <div className="section">
+          <h2>3. Выберите статус для подсчета</h2>
+          <select
+            value={statusName}
+            onChange={(e) => setStatusName(e.target.value)}
+            className="select-input"
+          >
+            <option value="in progress">in progress (английская О)</option>
+            <option value="in prоgress">in prоgress (русская О)</option>
+            <option value="in progrеss">in progrеss (русская е)</option>
+            <option value="custom">Другой статус (укажите ниже)</option>
+          </select>
+          {statusName === 'custom' && (
+            <input
+              type="text"
+              value={customStatus}
+              onChange={(e) => setCustomStatus(e.target.value)}
+              placeholder="Введите название статуса"
+              className="text-input"
+              style={{ marginTop: '12px' }}
+            />
+          )}
+        </div>
+
         {/* Session Cookie */}
         <div className="section">
-          <h2>3. Session Cookie (опционально)</h2>
+          <h2>4. Session Cookie (опционально)</h2>
           <input
             type="text"
             value={sessionCookie}
