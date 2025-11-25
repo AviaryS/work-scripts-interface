@@ -246,6 +246,33 @@ async def get_workspaces(session_cookie: str):
     cookies = {"session": session_cookie}
     
     try:
+        # Сначала проверяем аутентификацию через получение информации о пользователе
+        user_info_endpoints = [
+            "/api/v1/user",
+            "/api/user",
+            "/rest/api/1.0/user",
+        ]
+        
+        user_authenticated = False
+        for user_endpoint in user_info_endpoints:
+            try:
+                user_url = f"{base_url}{user_endpoint}"
+                headers = {"Accept": "application/json"}
+                user_resp = requests.get(user_url, cookies=cookies, headers=headers, timeout=5)
+                if user_resp.status_code == 200:
+                    try:
+                        user_data = user_resp.json()
+                        print(f"Пользователь аутентифицирован: {user_data}")
+                        user_authenticated = True
+                        break
+                    except:
+                        pass
+            except:
+                pass
+        
+        if not user_authenticated:
+            print("Предупреждение: не удалось подтвердить аутентификацию пользователя")
+        
         # Пробуем разные возможные эндпоинты для получения workspace
         possible_endpoints = [
             "/api/v1/workspaces",
@@ -253,18 +280,42 @@ async def get_workspaces(session_cookie: str):
             "/api/v1/user/workspaces",
             "/rest/api/1.0/workspaces",
             "/rest/api/workspaces",
+            "/api/v1/workspace",
+            "/api/workspace",
         ]
         
         for endpoint in possible_endpoints:
             try:
                 url = f"{base_url}{endpoint}"
                 print(f"Попытка получить workspace из: {url}")
-                resp = requests.get(url, cookies=cookies, timeout=10)
+                
+                # Добавляем заголовки для правильной работы с API
+                headers = {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                }
+                
+                resp = requests.get(url, cookies=cookies, headers=headers, timeout=10)
                 print(f"Статус ответа: {resp.status_code}")
+                print(f"Content-Type: {resp.headers.get('Content-Type', 'не указан')}")
+                print(f"Первые 200 символов ответа: {resp.text[:200]}")
                 
                 if resp.status_code == 200:
-                    data = resp.json()
-                    print(f"Получены данные: {type(data)}, ключи: {list(data.keys()) if isinstance(data, dict) else 'list'}")
+                    # Проверяем, что ответ действительно JSON
+                    content_type = resp.headers.get('Content-Type', '').lower()
+                    if 'application/json' not in content_type and 'text/json' not in content_type:
+                        print(f"Ответ не JSON, Content-Type: {content_type}")
+                        # Пробуем все равно распарсить, может быть JSON без правильного заголовка
+                        if not resp.text.strip() or resp.text.strip().startswith('<'):
+                            print(f"Ответ пустой или HTML, пропускаем {endpoint}")
+                            continue
+                    
+                    try:
+                        data = resp.json()
+                        print(f"Получены данные: {type(data)}, ключи: {list(data.keys()) if isinstance(data, dict) else 'list'}")
+                    except json.JSONDecodeError as je:
+                        print(f"Ошибка парсинга JSON: {je}, текст ответа: {resp.text[:500]}")
+                        continue
                     
                     # Обрабатываем разные форматы ответа
                     if isinstance(data, list):
@@ -275,6 +326,8 @@ async def get_workspaces(session_cookie: str):
                         workspaces = data["items"]
                     elif isinstance(data, dict) and "data" in data:
                         workspaces = data["data"]
+                    elif isinstance(data, dict) and "values" in data:
+                        workspaces = data["values"]
                     else:
                         workspaces = [data] if data else []
                     
@@ -298,12 +351,29 @@ async def get_workspaces(session_cookie: str):
                 continue
             except Exception as e:
                 print(f"Неожиданная ошибка при обработке {endpoint}: {e}")
+                import traceback
+                print(traceback.format_exc())
                 continue
         
-        raise HTTPException(status_code=404, detail="Не удалось найти эндпоинт для получения workspace")
+        # Если ни один эндпоинт не сработал, возвращаем более информативную ошибку
+        error_detail = (
+            "Не удалось получить список проектов. Возможные причины:\n"
+            "1. Неверный session cookie\n"
+            "2. API эндпоинты изменились\n"
+            "3. Нет доступа к проектам\n\n"
+            "Проверьте логи сервера для деталей."
+        )
+        raise HTTPException(status_code=404, detail=error_detail)
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Ошибка при получении workspace: {e}")
-        raise HTTPException(status_code=500, detail=f"Ошибка при получении списка проектов: {str(e)}")
+        print(f"Критическая ошибка при получении workspace: {e}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Внутренняя ошибка при получении списка проектов: {str(e)}"
+        )
 
 @app.get("/api/workspaces/{workspace_id}/workitems")
 async def get_workitems(workspace_id: str, session_cookie: str):
