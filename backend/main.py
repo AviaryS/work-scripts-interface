@@ -26,6 +26,7 @@ app.add_middleware(
 )
 
 # === Настройки ===
+TEAMSTORM_BASE_URL = "https://storm.alabuga.space"
 MOSCOW_TZ = timezone("Europe/Moscow")
 WORK_START_HOUR = 8
 WORK_END_HOUR = 17
@@ -241,7 +242,7 @@ async def get_workspaces(session_cookie: str):
     """
     Получает список всех workspace (проектов) из TeamStorm.
     """
-    base_url = "https://storm.alabuga.space"
+    base_url = TEAMSTORM_BASE_URL
     cookies = {"session": session_cookie}
     
     try:
@@ -250,6 +251,8 @@ async def get_workspaces(session_cookie: str):
             "/api/v1/workspaces",
             "/api/workspaces",
             "/api/v1/user/workspaces",
+            "/rest/api/1.0/workspaces",
+            "/rest/api/workspaces",
         ]
         
         for endpoint in possible_endpoints:
@@ -307,7 +310,7 @@ async def get_workitems(workspace_id: str, session_cookie: str):
     """
     Получает список всех задач (workitems) из указанного workspace.
     """
-    base_url = "https://storm.alabuga.space"
+    base_url = TEAMSTORM_BASE_URL
     cookies = {"session": session_cookie}
     
     try:
@@ -317,6 +320,8 @@ async def get_workitems(workspace_id: str, session_cookie: str):
             f"/api/workspaces/{workspace_id}/workItems",
             f"/api/v1/workspaces/{workspace_id}/items",
             f"/api/workspaces/{workspace_id}/items",
+            f"/rest/api/1.0/workspaces/{workspace_id}/workItems",
+            f"/rest/api/workspaces/{workspace_id}/workItems",
         ]
         
         all_items = []
@@ -393,7 +398,7 @@ async def process_data(request: ProcessRequest):
     if not request.periods:
         raise HTTPException(status_code=400, detail="Список periods пуст.")
     
-    base_url = "https://storm.alabuga.space/history/api/v1"
+    base_url = f"{TEAMSTORM_BASE_URL}/history/api/v1"
     grouped_by_period: Dict[Tuple[str, str], Dict[str, List[List[Any]]]] = {
         (p.start, p.end): defaultdict(list) for p in request.periods
     }
