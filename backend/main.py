@@ -255,9 +255,14 @@ async def get_workspaces(session_cookie: str):
         for endpoint in possible_endpoints:
             try:
                 url = f"{base_url}{endpoint}"
+                print(f"Попытка получить workspace из: {url}")
                 resp = requests.get(url, cookies=cookies, timeout=10)
+                print(f"Статус ответа: {resp.status_code}")
+                
                 if resp.status_code == 200:
                     data = resp.json()
+                    print(f"Получены данные: {type(data)}, ключи: {list(data.keys()) if isinstance(data, dict) else 'list'}")
+                    
                     # Обрабатываем разные форматы ответа
                     if isinstance(data, list):
                         workspaces = data
@@ -265,6 +270,8 @@ async def get_workspaces(session_cookie: str):
                         workspaces = data["workspaces"]
                     elif isinstance(data, dict) and "items" in data:
                         workspaces = data["items"]
+                    elif isinstance(data, dict) and "data" in data:
+                        workspaces = data["data"]
                     else:
                         workspaces = [data] if data else []
                     
@@ -273,12 +280,21 @@ async def get_workspaces(session_cookie: str):
                     for ws in workspaces:
                         if isinstance(ws, dict):
                             result.append({
-                                "id": ws.get("id") or ws.get("workspaceId"),
-                                "name": ws.get("name") or ws.get("title") or ws.get("displayName", "Без названия"),
-                                "key": ws.get("key"),
+                                "id": ws.get("id") or ws.get("workspaceId") or ws.get("_id"),
+                                "name": ws.get("name") or ws.get("title") or ws.get("displayName") or ws.get("workspaceName", "Без названия"),
+                                "key": ws.get("key") or ws.get("workspaceKey"),
                             })
-                    return {"workspaces": result}
-            except requests.RequestException:
+                    
+                    if result:
+                        print(f"Найдено workspace: {len(result)}")
+                        return {"workspaces": result}
+                else:
+                    print(f"Ошибка {resp.status_code}: {resp.text[:200]}")
+            except requests.RequestException as e:
+                print(f"Ошибка запроса к {endpoint}: {e}")
+                continue
+            except Exception as e:
+                print(f"Неожиданная ошибка при обработке {endpoint}: {e}")
                 continue
         
         raise HTTPException(status_code=404, detail="Не удалось найти эндпоинт для получения workspace")
@@ -308,9 +324,13 @@ async def get_workitems(workspace_id: str, session_cookie: str):
         for endpoint in possible_endpoints:
             try:
                 url = f"{base_url}{endpoint}"
+                print(f"Попытка получить workitems из: {url}")
                 resp = requests.get(url, cookies=cookies, timeout=30)
+                print(f"Статус ответа: {resp.status_code}")
+                
                 if resp.status_code == 200:
                     data = resp.json()
+                    print(f"Получены данные: {type(data)}, ключи: {list(data.keys()) if isinstance(data, dict) else 'list'}")
                     
                     # Обрабатываем разные форматы ответа
                     if isinstance(data, list):
@@ -321,17 +341,21 @@ async def get_workitems(workspace_id: str, session_cookie: str):
                         items = data["workItems"]
                     elif isinstance(data, dict) and "data" in data:
                         items = data["data"]
+                    elif isinstance(data, dict) and "results" in data:
+                        items = data["results"]
                     else:
                         items = [data] if data else []
+                    
+                    print(f"Найдено элементов: {len(items)}")
                     
                     # Форматируем задачи
                     for item in items:
                         if isinstance(item, dict):
                             formatted_item = {
-                                "key": item.get("key") or item.get("id"),
-                                "name": item.get("name") or item.get("title") or item.get("displayName", "Без названия"),
+                                "key": item.get("key") or item.get("id") or item.get("_id"),
+                                "name": item.get("name") or item.get("title") or item.get("displayName") or item.get("workItemName", "Без названия"),
                                 "workspaceId": workspace_id,
-                                "workitemId": item.get("id") or item.get("workitemId") or item.get("workItemId"),
+                                "workitemId": item.get("id") or item.get("workitemId") or item.get("workItemId") or item.get("_id"),
                                 "assignee": item.get("assignee") or {},
                             }
                             # Проверяем, что есть все необходимые поля
@@ -339,9 +363,15 @@ async def get_workitems(workspace_id: str, session_cookie: str):
                                 all_items.append(formatted_item)
                     
                     if all_items:
+                        print(f"Отформатировано задач: {len(all_items)}")
                         return {"items": all_items, "count": len(all_items)}
+                else:
+                    print(f"Ошибка {resp.status_code}: {resp.text[:200]}")
             except requests.RequestException as e:
                 print(f"Ошибка при запросе {endpoint}: {e}")
+                continue
+            except Exception as e:
+                print(f"Неожиданная ошибка при обработке {endpoint}: {e}")
                 continue
         
         if not all_items:
