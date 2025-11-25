@@ -236,6 +236,124 @@ def save_to_excel_multi(
 async def root():
     return {"message": "Work Scripts Interface API", "status": "running"}
 
+@app.get("/api/workspaces")
+async def get_workspaces(session_cookie: str):
+    """
+    Получает список всех workspace (проектов) из TeamStorm.
+    """
+    base_url = "https://storm.alabuga.space"
+    cookies = {"session": session_cookie}
+    
+    try:
+        # Пробуем разные возможные эндпоинты для получения workspace
+        possible_endpoints = [
+            "/api/v1/workspaces",
+            "/api/workspaces",
+            "/api/v1/user/workspaces",
+        ]
+        
+        for endpoint in possible_endpoints:
+            try:
+                url = f"{base_url}{endpoint}"
+                resp = requests.get(url, cookies=cookies, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Обрабатываем разные форматы ответа
+                    if isinstance(data, list):
+                        workspaces = data
+                    elif isinstance(data, dict) and "workspaces" in data:
+                        workspaces = data["workspaces"]
+                    elif isinstance(data, dict) and "items" in data:
+                        workspaces = data["items"]
+                    else:
+                        workspaces = [data] if data else []
+                    
+                    # Форматируем ответ
+                    result = []
+                    for ws in workspaces:
+                        if isinstance(ws, dict):
+                            result.append({
+                                "id": ws.get("id") or ws.get("workspaceId"),
+                                "name": ws.get("name") or ws.get("title") or ws.get("displayName", "Без названия"),
+                                "key": ws.get("key"),
+                            })
+                    return {"workspaces": result}
+            except requests.RequestException:
+                continue
+        
+        raise HTTPException(status_code=404, detail="Не удалось найти эндпоинт для получения workspace")
+    except Exception as e:
+        print(f"Ошибка при получении workspace: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении списка проектов: {str(e)}")
+
+@app.get("/api/workspaces/{workspace_id}/workitems")
+async def get_workitems(workspace_id: str, session_cookie: str):
+    """
+    Получает список всех задач (workitems) из указанного workspace.
+    """
+    base_url = "https://storm.alabuga.space"
+    cookies = {"session": session_cookie}
+    
+    try:
+        # Пробуем разные возможные эндпоинты
+        possible_endpoints = [
+            f"/api/v1/workspaces/{workspace_id}/workItems",
+            f"/api/workspaces/{workspace_id}/workItems",
+            f"/api/v1/workspaces/{workspace_id}/items",
+            f"/api/workspaces/{workspace_id}/items",
+        ]
+        
+        all_items = []
+        
+        for endpoint in possible_endpoints:
+            try:
+                url = f"{base_url}{endpoint}"
+                resp = requests.get(url, cookies=cookies, timeout=30)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    
+                    # Обрабатываем разные форматы ответа
+                    if isinstance(data, list):
+                        items = data
+                    elif isinstance(data, dict) and "items" in data:
+                        items = data["items"]
+                    elif isinstance(data, dict) and "workItems" in data:
+                        items = data["workItems"]
+                    elif isinstance(data, dict) and "data" in data:
+                        items = data["data"]
+                    else:
+                        items = [data] if data else []
+                    
+                    # Форматируем задачи
+                    for item in items:
+                        if isinstance(item, dict):
+                            formatted_item = {
+                                "key": item.get("key") or item.get("id"),
+                                "name": item.get("name") or item.get("title") or item.get("displayName", "Без названия"),
+                                "workspaceId": workspace_id,
+                                "workitemId": item.get("id") or item.get("workitemId") or item.get("workItemId"),
+                                "assignee": item.get("assignee") or {},
+                            }
+                            # Проверяем, что есть все необходимые поля
+                            if formatted_item["key"] and formatted_item["workitemId"]:
+                                all_items.append(formatted_item)
+                    
+                    if all_items:
+                        return {"items": all_items, "count": len(all_items)}
+            except requests.RequestException as e:
+                print(f"Ошибка при запросе {endpoint}: {e}")
+                continue
+        
+        if not all_items:
+            raise HTTPException(status_code=404, detail=f"Не удалось получить задачи для workspace {workspace_id}")
+        
+        return {"items": all_items, "count": len(all_items)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Ошибка при получении workitems: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка при получении задач: {str(e)}")
+
 @app.post("/api/process")
 async def process_data(request: ProcessRequest):
     """
